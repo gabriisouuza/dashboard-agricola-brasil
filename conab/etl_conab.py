@@ -1,9 +1,9 @@
 """
 etl_conab.py
 ===============================================================================
-Lê conab/raw/conab_atual.xlsx e gera conab_atual.csv na raiz do repositório.
+Lê conab/raw/Boletim_Safra_Graos.xlsx e gera conab_atual.csv na raiz do repositório.
 
-Detecta ano e mês automaticamente a partir de conab/raw/ultimo_baixado.txt.
+Detecta ano e mês automaticamente a partir do conteúdo de conab/ultimo_xlsx.txt.
 Se a estrutura do XLSX mudar de forma incompatível (abas em posições erradas,
 arquivo ausente, etc.), aborta com exit 1 SEM sobrescrever o CSV existente.
 
@@ -23,9 +23,11 @@ import openpyxl
 
 PASTA            = Path(__file__).resolve().parent          # conab/
 PASTA_RAW        = PASTA / "raw"                            # conab/raw/
-ARQUIVO_XLSX     = PASTA_RAW / "conab_atual.xlsx"
 ARQUIVO_CSV      = PASTA.parent / "conab_atual.csv"         # raiz do repositório
-ARQUIVO_REGISTRO = PASTA_RAW / "ultimo_baixado.txt"
+
+# AJUSTE 1: Alinhando nomes dos arquivos com o script de download
+ARQUIVO_XLSX     = PASTA_RAW / "Boletim_Safra_Graos.xlsx"
+ARQUIVO_REGISTRO = PASTA / "ultimo_xlsx.txt"
 
 REGIAO_MAP = {
     "AC": "Norte",        "AP": "Norte",        "AM": "Norte",   "PA": "Norte",
@@ -46,8 +48,6 @@ MESES_PT = {
 }
 
 # (indice_aba, keyword_validacao, label_csv, eh_inverno)
-# eh_inverno=True  -> safra ano/ano  (Cevada, Trigo)
-# eh_inverno=False -> safra (ano-1)/ano  (Soja, Milho, Feijão)
 ABAS_CONFIG = [
     (39, "soja",   "Soja",   False),
     (38, "milho",  "Milho",  False),
@@ -70,21 +70,25 @@ class ErroEstrutural(Exception):
 
 def parsear_versao() -> tuple[int, str]:
     """
-    Lê ultimo_baixado.txt e extrai (ano, mes_str).
-    Exemplo: 'site_previsao_de_safra-por_produto-mai-2026.xlsx' -> (2026, '05')
+    Lê ultimo_xlsx.txt e extrai (ano, mes_str) a partir do nome do arquivo salvo lá dentro.
+    Exemplo do conteúdo: 'site_previsao_de_safra-por_produto-mai-2026.xlsx' -> (2026, '05')
     """
     if not ARQUIVO_REGISTRO.exists():
         raise ErroEstrutural(
             f"Arquivo de registro não encontrado: {ARQUIVO_REGISTRO}\n"
             "Execute baixar_conab.py primeiro."
         )
+    
+    # AJUSTE 2: Lendo o nome original de dentro do arquivo de texto de controle
     nome = ARQUIVO_REGISTRO.read_text(encoding="utf-8").strip()
+    
     m = re.search(r'-([a-z]{3})-(\d{4})\.xlsx$', nome.lower())
     if not m:
         raise ErroEstrutural(
-            f"Não foi possível extrair ano/mês do nome '{nome}'.\n"
-            "Padrão esperado: ...-MMM-AAAA.xlsx  (ex: ...-mai-2026.xlsx)"
+            f"Não foi possível extrair ano/mês do texto '{nome}' encontrado em {ARQUIVO_REGISTRO.name}.\n"
+            "Padrão esperado dentro do txt: ...-MMM-AAAA.xlsx  (ex: ...-mai-2026.xlsx)"
         )
+    
     mes_abrev, ano = m.group(1), int(m.group(2))
     if mes_abrev not in MESES_PT:
         raise ErroEstrutural(f"Mês desconhecido no nome do arquivo: '{mes_abrev}'")
@@ -132,8 +136,8 @@ def processar(wb, sheetnames: list[str], ano_ref: int, data_levantamento: str) -
             area_raw   = row[2] if len(row) > 2 else None
             produt_raw = row[5] if len(row) > 5 else None
             prod_raw   = row[8] if len(row) > 8 else None
-            area   = round(float(area_raw   or 0) * 1000.0, 1)
-            prod   = round(float(prod_raw   or 0) * 1000.0, 1)
+            area = round(float(area_raw   or 0) * 1000.0, 1)
+            prod = round(float(prod_raw   or 0) * 1000.0, 1)
             produt = round(float(produt_raw or 0), 1)
             all_records.append({
                 "uf":                  uf,
@@ -201,7 +205,7 @@ def main() -> int:
         df.to_csv(ARQUIVO_CSV, index=False, encoding="utf-8-sig", float_format="%.1f")
 
         soja_total = df[df["cultura"] == "Soja"]["producao_ton"].sum()
-        print(f"\n  -> CSV salvo: {ARQUIVO_CSV}  ({len(df)} linhas)")
+        print(f"\n  -> CSV salvo: {ARQUIVO_CSV}  ({len(df)} lines)")
         print(f"  -> Produção Soja total: {soja_total / 1e6:.2f} M t")
         print(f"\n[OK] CSV gerado com sucesso.")
         return 0
